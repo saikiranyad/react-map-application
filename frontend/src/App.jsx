@@ -1,6 +1,6 @@
 import React from 'react'
 
-import NewMap from './Pages/Newmap'
+import NewMap from './components/NewMap'
 
 const App = () => {
   return (
