@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -6,7 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import "leaflet/dist/leaflet.css";
 import "./map.css";
 
-// Fly to destination
 const RecentMap = ({ coords, destination }) => {
   const map = useMap();
   useEffect(() => {
@@ -16,7 +14,6 @@ const RecentMap = ({ coords, destination }) => {
   return null;
 };
 
-// Handle map click
 const MapClickHandler = ({ setClickedLocation, setLocation }) => {
   const map = useMap();
 
@@ -48,20 +45,15 @@ const NewMap = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [destination, setDestination] = useState(null);
   const [routeCoords, setRouteCoords] = useState([]);
+  const [animatedRoute, setAnimatedRoute] = useState([]);
   const [rideActive, setRideActive] = useState(false);
   const [showRecenter, setShowRecenter] = useState(false);
   const [btnPos, setBtnPos] = useState({ x: 20, y: 20 });
-  const [clickedLocation, setClickedLocation] = useState(null);
-  const [vehiclePos, setVehiclePos] = useState(null);
-  const [distance, setDistance] = useState(null);
-  const [duration, setDuration] = useState(null);
-  const [glowOffset, setGlowOffset] = useState(0);
-
   const draggingRef = useRef(false);
   const mapRef = useRef();
-  const animationRef = useRef();
-  const routeAnimationRef = useRef();
   const [mapStyle, setMapStyle] = useState("osm");
+  const [clickedLocation, setClickedLocation] = useState(null);
+  const markerRef = useRef();
 
   const mapTiles = {
     osm: { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: '&copy; OpenStreetMap contributors' },
@@ -71,22 +63,50 @@ const NewMap = () => {
 
   const userIcon = new L.Icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png", iconSize: [25, 25] });
   const destinationIcon = new L.Icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", iconSize: [40, 40] });
-const vehicleIcon = new L.DivIcon({ 
-  className: "vehicle-marker", 
-  html: '<div class="blinking-car"></div>',  // updated class
-  iconSize: [25, 25],
-  iconAnchor: [12, 12]
-});
 
   // Watch user location
   useEffect(() => {
     const watcher = navigator.geolocation.watchPosition(
-      (pos) => setCoords([pos.coords.latitude, pos.coords.longitude]),
+      async (pos) => {
+        const newCoords = [pos.coords.latitude, pos.coords.longitude];
+
+        // Smoothly move marker
+        if (markerRef.current) markerRef.current.setLatLng(newCoords);
+        setCoords(newCoords);
+
+        // Update route
+        if (destination) {
+          try {
+            const res = await fetch(
+              `https://router.project-osrm.org/route/v1/driving/${newCoords[1]},${newCoords[0]};${destination[1]},${destination[0]}?overview=full&geometries=geojson`
+            );
+            const data = await res.json();
+            if (data.routes?.length) {
+              const route = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+              setRouteCoords(route);
+              setRideActive(true);
+              if (mapRef.current) mapRef.current.fitBounds(L.latLngBounds(route));
+
+              // Animate route drawing
+              if (animatedRoute.length === 0) {
+                setAnimatedRoute([newCoords]);
+              } else {
+                const lastPoint = animatedRoute[animatedRoute.length - 1];
+                const nextPoints = route.slice(route.findIndex(p => p[0] === lastPoint[0] && p[1] === lastPoint[1]));
+                if (nextPoints.length > 0) setAnimatedRoute(prev => [...prev, nextPoints[0]]);
+              }
+            }
+          } catch (err) {
+            console.error("Error updating route:", err);
+          }
+        }
+      },
       (err) => console.error(err),
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );
+
     return () => navigator.geolocation.clearWatch(watcher);
-  }, []);
+  }, [destination, animatedRoute]);
 
   // Search suggestions
   useEffect(() => {
@@ -106,6 +126,7 @@ const vehicleIcon = new L.DivIcon({
     setLocation(s.display_name);
     setShowSuggestions(false);
     setSuggestions([]);
+    setAnimatedRoute([]); // reset animated route
   };
 
   const handleSelectDestination = (e) => {
@@ -116,6 +137,7 @@ const vehicleIcon = new L.DivIcon({
       if (selected) setDestination([parseFloat(selected.lat), parseFloat(selected.lon)]);
     }
     setShowSuggestions(false);
+    setAnimatedRoute([]); // reset animated route
   };
 
   const handleDragStart = () => draggingRef.current = true;
@@ -132,53 +154,14 @@ const vehicleIcon = new L.DivIcon({
     if (data.routes?.length) {
       const route = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
       setRouteCoords(route);
-      setDistance((data.routes[0].distance / 1000).toFixed(2)); // km
-      setDuration(Math.ceil(data.routes[0].duration / 60)); // min
+      setAnimatedRoute([coords]); // start animated route
       setRideActive(true);
-      setVehiclePos(route[0]);
       if (mapRef.current) mapRef.current.fitBounds(L.latLngBounds(route));
-
-      // Voice guidance
-      const msg = new SpeechSynthesisUtterance(`Route is ${data.routes[0].distance/1000} kilometers and will take around ${Math.ceil(data.routes[0].duration / 60)} minutes`);
-      window.speechSynthesis.speak(msg);
-
-      // Animate vehicle
-      let i = 0;
-      cancelAnimationFrame(animationRef.current);
-      const animateVehicle = () => {
-        if (!route[i]) return;
-        setVehiclePos(route[i]);
-        i++;
-        if (i < route.length) animationRef.current = requestAnimationFrame(animateVehicle);
-      };
-      animationRef.current = requestAnimationFrame(animateVehicle);
-
-      // Animate glowing route
-      cancelAnimationFrame(routeAnimationRef.current);
-      const animateRoute = () => {
-        setGlowOffset(prev => (prev + 1) % 100);
-        routeAnimationRef.current = requestAnimationFrame(animateRoute);
-      };
-      routeAnimationRef.current = requestAnimationFrame(animateRoute);
     }
   };
 
-  const cancelRide = () => {
-    setRideActive(false);
-    setRouteCoords([]);
-    setDestination(null);
-    setLocation("");
-    setVehiclePos(null);
-    setDistance(null);
-    setDuration(null);
-    cancelAnimationFrame(animationRef.current);
-    cancelAnimationFrame(routeAnimationRef.current);
-    setGlowOffset(0);
-  };
-
-  const recenterToUser = () => {
-    if (mapRef.current && coords) mapRef.current.flyTo(coords, 16, { animate: true, duration: 1.8 });
-  };
+  const cancelRide = () => { setRideActive(false); setRouteCoords([]); setDestination(null); setLocation(""); setAnimatedRoute([]); };
+  const recenterToUser = () => { if (mapRef.current && coords) mapRef.current.flyTo(coords, 16, { animate: true, duration: 1.8 }); };
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -224,12 +207,9 @@ const vehicleIcon = new L.DivIcon({
         )}
       </AnimatePresence>
 
-      {rideActive && (
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }}>
-          <motion.button onClick={cancelRide} style={{ marginTop: "10px", padding: "8px 12px", background: "#dc3545", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer" }} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>Cancel Ride</motion.button>
-          {distance && duration && <div style={{ marginTop: "8px" }}>Distance: {distance} km | ETA: {duration} min</div>}
-        </motion.div>
-      )}
+      {rideActive && <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }}>
+        <motion.button onClick={cancelRide} style={{ marginTop: "10px", padding: "8px 12px", background: "#dc3545", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer" }} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>Cancel Ride</motion.button>
+      </motion.div>}
 
       {coords && (
         <div style={{ position: "relative", marginTop: "15px" }}>
@@ -238,7 +218,7 @@ const vehicleIcon = new L.DivIcon({
             <RecentMap coords={coords} destination={destination || coords} />
             <MapClickHandler setClickedLocation={setClickedLocation} setLocation={setLocation} />
 
-            <Marker position={coords} icon={userIcon}><Popup>Your Location</Popup></Marker>
+            <Marker ref={markerRef} position={coords} icon={userIcon}><Popup>Your Location</Popup></Marker>
             {destination && <Marker position={destination} icon={destinationIcon}><Popup>{location}</Popup></Marker>}
             {clickedLocation && (
               <Marker position={clickedLocation}>
@@ -249,10 +229,8 @@ const vehicleIcon = new L.DivIcon({
                 </Popup>
               </Marker>
             )}
-            {vehiclePos && <Marker position={vehiclePos} icon={vehicleIcon}></Marker>}
-            {routeCoords.length > 0 && (
-              <Polyline positions={routeCoords} color="blue" weight={5} pathOptions={{ dashArray: '10,10', dashOffset: `${glowOffset}px` }} />
-            )}
+
+            {animatedRoute.length > 0 && <Polyline positions={animatedRoute} color="blue" weight={5} />}
           </MapContainer>
 
           <AnimatePresence>
