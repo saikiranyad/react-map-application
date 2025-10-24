@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -15,13 +16,15 @@ const RecentMap = ({ coords, destination }) => {
   return null;
 };
 
-// Map click handler
+// Handle map click
 const MapClickHandler = ({ setClickedLocation, setLocation }) => {
   const map = useMap();
+
   useEffect(() => {
     const handleClick = async (e) => {
       const latlng = [e.latlng.lat, e.latlng.lng];
       setClickedLocation(latlng);
+
       try {
         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng[0]}&lon=${latlng[1]}`);
         const data = await res.json();
@@ -30,9 +33,11 @@ const MapClickHandler = ({ setClickedLocation, setLocation }) => {
         console.error("Reverse geocoding error:", err);
       }
     };
+
     map.on("click", handleClick);
     return () => map.off("click", handleClick);
   }, [map, setClickedLocation, setLocation]);
+
   return null;
 };
 
@@ -47,12 +52,14 @@ const NewMap = () => {
   const [showRecenter, setShowRecenter] = useState(false);
   const [btnPos, setBtnPos] = useState({ x: 20, y: 20 });
   const [clickedLocation, setClickedLocation] = useState(null);
+  const [vehiclePos, setVehiclePos] = useState(null);
   const [distance, setDistance] = useState(null);
   const [duration, setDuration] = useState(null);
   const [glowOffset, setGlowOffset] = useState(0);
 
   const draggingRef = useRef(false);
   const mapRef = useRef();
+  const animationRef = useRef();
   const routeAnimationRef = useRef();
   const [mapStyle, setMapStyle] = useState("osm");
 
@@ -64,14 +71,14 @@ const NewMap = () => {
 
   const userIcon = new L.Icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png", iconSize: [25, 25] });
   const destinationIcon = new L.Icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", iconSize: [40, 40] });
-  const vehicleIcon = new L.DivIcon({ 
-    className: "vehicle-marker", 
-    html: '<div class="blinking-car"></div>',  // keeps your blinking red car
-    iconSize: [25, 25],
-    iconAnchor: [12, 12]
-  });
+const vehicleIcon = new L.DivIcon({ 
+  className: "vehicle-marker", 
+  html: '<div class="blinking-car"></div>',  // updated class
+  iconSize: [25, 25],
+  iconAnchor: [12, 12]
+});
 
-  // Watch user location in real-time (vehicle moves only with GPS)
+  // Watch user location
   useEffect(() => {
     const watcher = navigator.geolocation.watchPosition(
       (pos) => setCoords([pos.coords.latitude, pos.coords.longitude]),
@@ -125,16 +132,28 @@ const NewMap = () => {
     if (data.routes?.length) {
       const route = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
       setRouteCoords(route);
-      setDistance((data.routes[0].distance / 1000).toFixed(2));
-      setDuration(Math.ceil(data.routes[0].duration / 60));
+      setDistance((data.routes[0].distance / 1000).toFixed(2)); // km
+      setDuration(Math.ceil(data.routes[0].duration / 60)); // min
       setRideActive(true);
+      setVehiclePos(route[0]);
       if (mapRef.current) mapRef.current.fitBounds(L.latLngBounds(route));
 
       // Voice guidance
-      const msg = new SpeechSynthesisUtterance(`Route is ${(data.routes[0].distance/1000).toFixed(1)} kilometers and will take around ${Math.ceil(data.routes[0].duration / 60)} minutes`);
+      const msg = new SpeechSynthesisUtterance(`Route is ${data.routes[0].distance/1000} kilometers and will take around ${Math.ceil(data.routes[0].duration / 60)} minutes`);
       window.speechSynthesis.speak(msg);
 
-      // Animate glowing route only
+      // Animate vehicle
+      let i = 0;
+      cancelAnimationFrame(animationRef.current);
+      const animateVehicle = () => {
+        if (!route[i]) return;
+        setVehiclePos(route[i]);
+        i++;
+        if (i < route.length) animationRef.current = requestAnimationFrame(animateVehicle);
+      };
+      animationRef.current = requestAnimationFrame(animateVehicle);
+
+      // Animate glowing route
       cancelAnimationFrame(routeAnimationRef.current);
       const animateRoute = () => {
         setGlowOffset(prev => (prev + 1) % 100);
@@ -149,8 +168,10 @@ const NewMap = () => {
     setRouteCoords([]);
     setDestination(null);
     setLocation("");
+    setVehiclePos(null);
     setDistance(null);
     setDuration(null);
+    cancelAnimationFrame(animationRef.current);
     cancelAnimationFrame(routeAnimationRef.current);
     setGlowOffset(0);
   };
@@ -228,9 +249,7 @@ const NewMap = () => {
                 </Popup>
               </Marker>
             )}
-            {/* Vehicle marker stays on current GPS */}
-            {coords && <Marker position={coords} icon={vehicleIcon}></Marker>}
-
+            {vehiclePos && <Marker position={vehiclePos} icon={vehicleIcon}></Marker>}
             {routeCoords.length > 0 && (
               <Polyline positions={routeCoords} color="blue" weight={5} pathOptions={{ dashArray: '10,10', dashOffset: `${glowOffset}px` }} />
             )}
