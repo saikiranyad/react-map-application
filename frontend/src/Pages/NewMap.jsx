@@ -66,12 +66,12 @@ const NewMap = () => {
   const destinationIcon = new L.Icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", iconSize: [40, 40] });
   const vehicleIcon = new L.DivIcon({ 
     className: "vehicle-marker", 
-    html: '<div class="blinking-car"></div>',  
+    html: '<div class="blinking-car"></div>',  // keeps your blinking red car
     iconSize: [25, 25],
     iconAnchor: [12, 12]
   });
 
-  // Watch user location in real-time
+  // Watch user location in real-time (vehicle moves only with GPS)
   useEffect(() => {
     const watcher = navigator.geolocation.watchPosition(
       (pos) => setCoords([pos.coords.latitude, pos.coords.longitude]),
@@ -134,7 +134,7 @@ const NewMap = () => {
       const msg = new SpeechSynthesisUtterance(`Route is ${(data.routes[0].distance/1000).toFixed(1)} kilometers and will take around ${Math.ceil(data.routes[0].duration / 60)} minutes`);
       window.speechSynthesis.speak(msg);
 
-      // Animate glowing route
+      // Animate glowing route only
       cancelAnimationFrame(routeAnimationRef.current);
       const animateRoute = () => {
         setGlowOffset(prev => (prev + 1) % 100);
@@ -228,7 +228,9 @@ const NewMap = () => {
                 </Popup>
               </Marker>
             )}
+            {/* Vehicle marker stays on current GPS */}
             {coords && <Marker position={coords} icon={vehicleIcon}></Marker>}
+
             {routeCoords.length > 0 && (
               <Polyline positions={routeCoords} color="blue" weight={5} pathOptions={{ dashArray: '10,10', dashOffset: `${glowOffset}px` }} />
             )}
